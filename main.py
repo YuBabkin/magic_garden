@@ -22,6 +22,10 @@ class DNA:
         self.color_end = tuple(look.get("цвет_конечный", [139, 69, 19]))
         self.color_max_age = look.get("макс_возраст_цвета", 50)
 
+        self.alpha_start = look.get("alpha_start", 0.2)
+        self.alpha_end = look.get("alpha_end", 1.0)
+        self.alpha_max_age = look.get("макс_возраст_alpha", 20)
+
         self.probabilities = growth.get("вероятности", [0.5, 0.25, 0.15, 0.1, 0.05])
         self.azimuth_loc = growth.get("азимут_loc", 0)
         self.azimuth_scale = growth.get("азимут_scale", 25)
@@ -58,12 +62,16 @@ class Branch:
             return 0.0
         return dna.thickness_b * np.log(self.age) + dna.thickness_a
 
+    def alpha(self, dna):
+        t = min(1.0, self.age / dna.alpha_max_age)
+        return dna.alpha_start + t * (dna.alpha_end - dna.alpha_start)
+
     def color(self, dna):
         t = min(1.0, self.age / dna.color_max_age)
         r = dna.color_start[0] + t * (dna.color_end[0] - dna.color_start[0])
         g = dna.color_start[1] + t * (dna.color_end[1] - dna.color_start[1])
         b = dna.color_start[2] + t * (dna.color_end[2] - dna.color_start[2])
-        return (r / 255, g / 255, b / 255)
+        return (r / 255, g / 255, b / 255, self.alpha(dna))
 
 
 class Tree:

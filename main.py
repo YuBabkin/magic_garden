@@ -4,6 +4,7 @@ import random
 import sys
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 class DNA:
@@ -13,19 +14,18 @@ class DNA:
         growth = data.get("параметры начала роста новой ветки", {})
 
         self.length_a = phys.get("длина", {}).get("a", 2.0)
-        self.length_b = phys.get("длина", {}).get("b", 0.05)
+        self.length_b = phys.get("длина", {}).get("b", 1.0)
         self.thickness_a = phys.get("толщина", {}).get("a", 0.3)
-        self.thickness_b = phys.get("толщина", {}).get("b", 0.08)
+        self.thickness_b = phys.get("толщина", {}).get("b", 0.2)
 
         self.color_start = tuple(look.get("цвет_начальный", [34, 139, 34]))
         self.color_end = tuple(look.get("цвет_конечный", [139, 69, 19]))
+        self.color_max_age = look.get("макс_возраст_цвета", 50)
 
-        self.base_prob = growth.get("вероятность_базовая", 0.4)
-        self.decay = growth.get("вероятность_затухание", 0.2)
-        self.max_children = growth.get("максимум_потомков", 4)
-        self.azimuth_min = growth.get("азимут_мин", -40)
-        self.azimuth_max = growth.get("азимут_макс", 40)
-        self.epochs = growth.get("эпох", 30)
+        self.probabilities = growth.get("вероятности", [0.5, 0.25, 0.15, 0.1, 0.05])
+        self.azimuth_loc = growth.get("азимут_loc", 0)
+        self.azimuth_scale = growth.get("азимут_scale", 25)
+        self.epochs = growth.get("эпох", 40)
 
 
 class Branch:
@@ -41,18 +41,25 @@ class Branch:
     def angle(self):
         return self.parent_angle + self.azimuth
 
+    def length(self, dna):
+        if self.age < 1:
+            return 0.0
+        return dna.length_b * np.log(self.age) + dna.length_a
+
     def end_pos(self, dna):
         rad = math.radians(self.angle)
-        length = dna.length_a * (1 - math.exp(-dna.length_b * self.age))
-        x = self.start_pos[0] + length * math.cos(rad)
-        y = self.start_pos[1] + length * math.sin(rad)
+        l = self.length(dna)
+        x = self.start_pos[0] + l * math.cos(rad)
+        y = self.start_pos[1] + l * math.sin(rad)
         return (x, y)
 
     def thickness(self, dna):
-        return dna.thickness_a * (1 - math.exp(-dna.thickness_b * self.age))
+        if self.age < 1:
+            return 0.0
+        return dna.thickness_b * np.log(self.age) + dna.thickness_a
 
     def color(self, dna):
-        t = min(1.0, self.age / 50.0)
+        t = min(1.0, self.age / dna.color_max_age)
         r = dna.color_start[0] + t * (dna.color_end[0] - dna.color_start[0])
         g = dna.color_start[1] + t * (dna.color_end[1] - dna.color_start[1])
         b = dna.color_start[2] + t * (dna.color_end[2] - dna.color_start[2])
@@ -68,27 +75,29 @@ class Tree:
 
     def grow(self):
         self.epoch += 1
-        new = []
 
         for branch in self.all_branches:
             branch.age += 1
 
-            n = len(branch.children)
-            prob = self.dna.base_prob * (self.dna.decay ** n)
+        new_branches = []
 
-            if random.random() < prob and n < self.dna.max_children:
-                offset = random.uniform(self.dna.azimuth_min, self.dna.azimuth_max)
+        for branch in self.all_branches:
+            n = len(branch.children)
+            prob = self.dna.probabilities[n] if n < len(self.dna.probabilities) else 0.0
+
+            if random.random() < prob:
+                alpha = random.gauss(self.dna.azimuth_loc, self.dna.azimuth_scale)
                 child = Branch(
                     age=0,
                     floor=branch.floor + 1,
-                    azimuth=offset,
+                    azimuth=branch.azimuth + alpha,
                     start_pos=branch.end_pos(self.dna),
                     parent_angle=branch.angle,
                 )
                 branch.children.append(child)
-                new.append(child)
+                new_branches.append(child)
 
-        self.all_branches.extend(new)
+        self.all_branches.extend(new_branches)
 
     def draw(self, ax=None):
         if ax is None:

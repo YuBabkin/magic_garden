@@ -35,7 +35,7 @@ class DNA:
 - `age: int` — возраст в эпохах (0 = новая)
 - `floor: int` — уровень вложенности (0 = корень)
 - `azimuth: float` — отклонение от родителя (градусы)
-- `parent_angle: float` — абсолютный угол родителя (для корня 90°)
+- `parent_azimuth: float` — абсолютный угол родителя (для корня 90°)
 - `parent: Branch | None` — ссылка на родительскую ветку
 - `children: list[Branch]`
 
@@ -46,7 +46,7 @@ class DNA:
 - Иначе: return parent.end_pos(dna)
 
 **`angle` (property) -> float**
-- parent_angle + azimuth
+- parent_azimuth + azimuth
 
 **`length(dna) -> float`**
 - age < 1 → 0.0
@@ -73,11 +73,11 @@ class DNA:
 
 **`spawn_child(dna) -> Branch`**
 - deviation = random.gauss(dna.azimuth_loc, dna.azimuth_scale)
-- return Branch(age=0, floor=self.floor+1, azimuth=deviation, parent_angle=self.angle, parent=self)
+- return Branch(age=0, floor=self.floor+1, azimuth=deviation, parent_azimuth=self.angle, parent=self)
 
 ## Подводные камни
 
-- **azimuth НЕ накапливается.** Это только deviation. Наследование угла через `parent_angle`.
+- **azimuth НЕ накапливается.** Это только deviation. Наследование угла через `parent_azimuth`.
 - **start_pos — метод, а не поле.** Вычисляется динамически от родителя.
 - **log(age) при age < 1:** возвращать 0.0, иначе math.log(0) упадёт.
 - **spawn_child:** age=0, начнёт расти в следующую эпоху.

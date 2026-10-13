@@ -6,6 +6,8 @@ import sys
 
 import pygame
 
+from aspiration import step_relative
+
 
 class DNA:
     def __init__(self, data: dict):
@@ -19,22 +21,34 @@ class DNA:
         self.thickness_a = thickness_params.get("a", 0.3)
         self.thickness_b = thickness_params.get("b", 0.4)
 
-        look = data.get("внешний вид", {})
+        look = data.get("внешний вид дерева", {})
 
         self.color_start = tuple(look.get("цвет_начальный", [34, 139, 34]))
         self.color_end = tuple(look.get("цвет_конечный", [139, 69, 19]))
         self.color_max_age = look.get("макс_возраст_цвета", 50)
 
-        self.alpha_start = look.get("alpha_start", 0.2)
-        self.alpha_end = look.get("alpha_end", 1.0)
-        self.alpha_max_age = look.get("макс_возраст_alpha", 20)
+        self.alpha_start = look.get("прозрачность_начальная", 0.2)
+        self.alpha_end = look.get("прозрачность_конечная", 1.0)
+        self.alpha_max_age = look.get("макс_возраст_прозрачности", 20)
 
-        growth = data.get("параметры начала роста новой ветки", {})
+        dna_params = data.get("ДНК", {})
 
-        self.probabilities = growth.get("вероятности", [0.5, 0.25, 0.15, 0.1, 0.05])
-        self.azimuth_loc = growth.get("азимут_loc", 0)
-        self.azimuth_scale = growth.get("азимут_scale", 25)
-        self.epochs = growth.get("эпох", 40)
+        self.probabilities = dna_params.get("вероятность", [0.5, 0.25, 0.15, 0.1, 0.05])
+        self.azimuth_loc = dna_params.get("азимут_среднее", [0, 0, 0, 0, 0])
+        self.azimuth_scale = dna_params.get("азимут_отклонение", [25, 25, 25, 25, 25])
+        self.twist_loc = dna_params.get("скручивание_среднее", [0, 0, 0, 0, 0])
+        self.twist_scale = dna_params.get("скручивание_отклонение", [0, 0, 0, 0, 0])
+        self.aspiration = dna_params.get("стремление", [0, 0, 0, 0, 0])
+        self.aspiration_strength = dna_params.get("сила стремления", [0.0, 0.0, 0.0, 0.0, 0.0])
+        self.epochs = dna_params.get("эпох", 40)
+
+        viz = data.get("визуализация", {})
+
+        self.window_width = viz.get("ширина_окна", 1000)
+        self.window_height = viz.get("высота_окна", 800)
+        self.sky_background = tuple(viz.get("цвет_неба", [230, 245, 255]))
+        self.ground_background = tuple(viz.get("цвет_земли", [100, 180, 80]))
+        self.ground_height = viz.get("высота_земли", 0.25)
 
     @staticmethod
     def from_json(path: str):
@@ -43,12 +57,16 @@ class DNA:
 
 
 class Branch:
-    def __init__(self, age, floor, azimuth, parent_angle, parent=None):
+    def __init__(self, age, floor, azimuth, parent_azimuth, parent=None, twist=0.0,
+                 aspiration=0.0, aspiration_strength=0.0):
         self.age = age
         self.floor = floor
         self.azimuth = azimuth
-        self.parent_angle = parent_angle
+        self.parent_azimuth = parent_azimuth
         self.parent = parent
+        self.twist = twist
+        self.aspiration = aspiration
+        self.aspiration_strength = aspiration_strength
         self.children = []
 
     def start_pos(self, dna):
@@ -58,7 +76,7 @@ class Branch:
 
     @property
     def angle(self):
-        return self.parent_angle + self.azimuth
+        return self.parent_azimuth + self.azimuth + self.twist
 
     def length(self, dna):
         if self.age < 1:
@@ -86,25 +104,58 @@ class Branch:
         rad = math.radians(self.angle)
         l = self.length(dna)
         s = self.start_pos(dna)
-        x = s[0] + l * math.cos(rad)
-        y = s[1] + l * math.sin(rad)
+        x = s[0] + l * math.sin(rad)
+        y = s[1] + l * math.cos(rad)
         return (x, y)
 
-    def spawn_child(self, dna):
-        deviation = random.gauss(dna.azimuth_loc, dna.azimuth_scale)
+    def spawn_child(self, dna, n):
+        loc = dna.azimuth_loc[n] if n < len(dna.azimuth_loc) else dna.azimuth_loc[-1]
+        scale = dna.azimuth_scale[n] if n < len(dna.azimuth_scale) else dna.azimuth_scale[-1]
+        deviation = random.choice([-1, 1]) * abs(random.gauss(loc, scale))
+        twist_loc = dna.twist_loc[n] if n < len(dna.twist_loc) else dna.twist_loc[-1]
+        twist_scale = dna.twist_scale[n] if n < len(dna.twist_scale) else dna.twist_scale[-1]
+
+        twist = self.twist + random.gauss(twist_loc, twist_scale)
+
+        if n == 0:
+            aspiration = self.aspiration
+            aspiration_strength = self.aspiration_strength
+        else:
+            aspiration = dna.aspiration[n] if n < len(dna.aspiration) else dna.aspiration[-1]
+            aspiration = random.choice([-1, 1]) * abs(aspiration)
+            aspiration_strength = dna.aspiration_strength[n] if n < len(dna.aspiration_strength) else dna.aspiration_strength[-1]
+            aspiration_strength = min(1.0, max(0.0, aspiration_strength))
+
+        angle = self.angle + deviation + twist
+        angle = step_relative(angle, aspiration, aspiration_strength)
+
         return Branch(
-            age=0,
+            age=n,
             floor=self.floor + 1,
-            azimuth=deviation,
-            parent_angle=self.angle,
+            azimuth=angle - self.angle - twist,
+            parent_azimuth=self.angle,
             parent=self,
+            twist=twist,
+            aspiration=aspiration,
+            aspiration_strength=aspiration_strength
         )
 
 
 class Tree:
     def __init__(self, dna):
         self.dna = dna
-        self.root = Branch(age=0, floor=0, azimuth=0, parent_angle=90)
+        root_aspiration = dna.aspiration[0] if dna.aspiration else 0.0
+        root_aspiration = random.choice([-1, 1]) * abs(root_aspiration)
+        root_strength = dna.aspiration_strength[0] if dna.aspiration_strength else 0.0
+        root_strength = min(1.0, max(0.0, root_strength))
+        self.root = Branch(
+            age=0,
+            floor=0,
+            azimuth=0,
+            parent_azimuth=0,
+            aspiration=root_aspiration,
+            aspiration_strength=root_strength
+        )
         self.all_branches = [self.root]
         self.epoch = 0
 
@@ -121,7 +172,7 @@ class Tree:
             prob = self.dna.probabilities[n] if n < len(self.dna.probabilities) else 0.0
 
             if random.random() < prob:
-                child = branch.spawn_child(self.dna)
+                child = branch.spawn_child(self.dna, n)
                 branch.children.append(child)
                 new_branches.append(child)
 
@@ -184,19 +235,25 @@ class Tree:
 
         _draw(self.root)
 
-        ground_sy = to_screen((0, 0))[1]
-        return ground_sy
-
     def animate(self):
-        WIDTH, HEIGHT = 1000, 800
+        width, height = self.dna.window_width, self.dna.window_height
 
         pygame.init()
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_mode((width, height), pygame.RESIZABLE)
         pygame.display.set_caption("Волшебное дерево")
         font = pygame.font.SysFont("Arial", 24)
         small_font = pygame.font.SysFont("Arial", 18)
 
-        tree_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        try:
+            from pygame._sdl2 import video as sdl2_video
+
+            window = sdl2_video.Window.from_display_module()
+        except Exception:
+            window = None
+
+        fullscreen = False
+        maximized = False
+        tree_surface = None
 
         finished = False
         paused = False
@@ -211,16 +268,47 @@ class Tree:
                         paused = not paused
                     elif event.key == pygame.K_ESCAPE:
                         running = False
+                    elif event.key == pygame.K_F11:
+                        fullscreen = not fullscreen
+                        if window is not None:
+                            if fullscreen:
+                                window.set_fullscreen(True)
+                            else:
+                                window.set_windowed()
+                        else:
+                            if fullscreen:
+                                desktop = pygame.display.Info()
+                                pygame.display.set_mode(
+                                    (desktop.current_w, desktop.current_h), pygame.FULLSCREEN
+                                )
+                            else:
+                                pygame.display.set_mode((width, height), pygame.RESIZABLE)
+                    elif event.key == pygame.K_F10 and window is not None:
+                        maximized = not maximized
+                        if maximized:
+                            window.maximize()
+                        else:
+                            window.restore()
 
             if not finished and not paused:
                 self.grow()
 
-            tree_surface.fill((0, 0, 0, 0))
-            ground_sy = self.draw(tree_surface, WIDTH, HEIGHT)
+            screen = pygame.display.get_surface()
+            new_width, new_height = screen.get_size()
+            if (new_width, new_height) != (width, height):
+                width, height = new_width, new_height
+                tree_surface = None
+            if tree_surface is None:
+                tree_surface = pygame.Surface((width, height), pygame.SRCALPHA)
 
-            screen.fill((230, 245, 255))
-            pygame.draw.rect(screen, (100, 180, 80), (0, int(ground_sy), WIDTH, HEIGHT - int(ground_sy)))
-            pygame.draw.line(screen, (80, 140, 60), (0, int(ground_sy)), (WIDTH, int(ground_sy)), 3)
+            tree_surface.fill((0, 0, 0, 0))
+            self.draw(tree_surface, width, height)
+
+            ground_sy = int(height * (1 - self.dna.ground_height))
+
+            screen.fill(self.dna.sky_background)
+            pygame.draw.rect(screen, self.dna.ground_background, (0, ground_sy, width, height - ground_sy))
+            pygame.draw.line(screen, (80, 140, 60), (0, ground_sy), (width, ground_sy), 3)
 
             screen.blit(tree_surface, (0, 0))
 
@@ -228,12 +316,16 @@ class Tree:
             text_surface = font.render(info, True, (30, 30, 30))
             screen.blit(text_surface, (15, 15))
 
+            hint = "Пробел — пауза, F10 — развернуть окно, F11 — полный экран, ESC — выход"
+            hint_surface = small_font.render(hint, True, (120, 120, 120))
+            screen.blit(hint_surface, (15, 48))
+
             if finished:
                 done_surface = small_font.render("Симуляция завершена. ESC — выход.", True, (100, 100, 100))
-                screen.blit(done_surface, (15, 50))
+                screen.blit(done_surface, (15, 72))
             elif paused:
                 pause_surface = small_font.render("ПАУЗА. Пробел — продолжить.", True, (100, 100, 100))
-                screen.blit(pause_surface, (15, 50))
+                screen.blit(pause_surface, (15, 72))
 
             pygame.display.flip()
 

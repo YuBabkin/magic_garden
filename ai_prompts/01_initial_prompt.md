@@ -40,11 +40,11 @@
 
 ### Branch — одна ветка
 
-**Поля:** age, floor, azimuth, parent_angle, parent (ссылка), children.
+**Поля:** age, floor, azimuth, parent_azimuth, parent (ссылка), children.
 
 **Методы и свойства:**
 - `start_pos(dna)` → (x,y): если parent=None → (0,0), иначе parent.end_pos(dna)
-- `angle` (property) → parent_angle + azimuth
+- `angle` (property) → parent_azimuth + azimuth
 - `length(dna)` → b·ln(age)+a, при age<1 → 0.0
 - `thickness(dna)` → b·ln(age)+a, при age<1 → 0.0
 - `alpha(dna)` → линейная интерполяция alpha_start → alpha_end
